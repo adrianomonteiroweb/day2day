@@ -20,33 +20,98 @@ interface Expense {
   timestamp: Date;
 }
 
+interface MonthlyStats {
+  daysInMonth: number;
+  remainingDays: number;
+  daysWithExpenses: number;
+  realDailyAverage: number;
+  projectedDailyAverage: number;
+  totalSpent: number;
+  projectedMonthTotal: number;
+}
+
 const { width, height } = Dimensions.get('window');
-const MIN_FONT_SCALE = 0.8;
-const MAX_FONT_SCALE = 1.2;
 
 export default function DailyExpenses() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [amount, setAmount] = useState('');
   const [totalToday, setTotalToday] = useState(0);
+  const [monthlyStats, setMonthlyStats] = useState<MonthlyStats>({
+    daysInMonth: 0,
+    remainingDays: 0,
+    daysWithExpenses: 0,
+    realDailyAverage: 0,
+    projectedDailyAverage: 0,
+    totalSpent: 0,
+    projectedMonthTotal: 0
+  });
 
   useEffect(() => {
     calculateTotalToday();
+    calculateMonthlyStats();
   }, [expenses]);
+
+  const calculateMonthlyStats = () => {
+    const today = moment();
+    const daysInMonth = today.daysInMonth();
+    const remainingDays = daysInMonth - today.date();
+
+    const currentMonthExpenses = expenses.filter(expense => 
+      moment(expense.timestamp).isSame(today, 'month')
+    );
+
+    const totalSpent = currentMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+
+    const expensesByDay = currentMonthExpenses.reduce((acc, expense) => {
+      const day = moment(expense.timestamp).date();
+      if (!acc[day]) acc[day] = 0;
+      acc[day] += expense.amount;
+      return acc;
+    }, {} as Record<number, number>);
+
+    const daysWithExpenses = Object.keys(expensesByDay).length;
+    const realDailyAverage = daysWithExpenses > 0 ? totalSpent / daysWithExpenses : 0;
+
+    const last5DaysExpenses = Object.entries(expensesByDay)
+      .sort(([dayA], [dayB]) => Number(dayB) - Number(dayA))
+      .slice(0, 5);
+
+    const projectedDailyAverage = last5DaysExpenses.length > 0
+      ? last5DaysExpenses.reduce((sum, [, amount]) => sum + amount, 0) / last5DaysExpenses.length
+      : realDailyAverage;
+
+    const projectedMonthTotal = totalSpent + (projectedDailyAverage * remainingDays);
+
+    setMonthlyStats({
+      daysInMonth,
+      remainingDays,
+      daysWithExpenses,
+      realDailyAverage,
+      projectedDailyAverage,
+      totalSpent,
+      projectedMonthTotal
+    });
+  };
 
   const calculateTotalToday = () => {
     const today = moment().startOf('day');
-    const todayExpenses = expenses.filter(expense => {
-      return moment(expense.timestamp).isSame(today, 'day');
-    });
-
+    const todayExpenses = expenses.filter(expense => 
+      moment(expense.timestamp).isSame(today, 'day')
+    );
     const total = todayExpenses.reduce((sum, expense) => sum + expense.amount, 0);
     setTotalToday(total);
   };
 
+  const handleAmountChange = (text: string) => {
+    const cleanedText = text.replace(/[^0-9,]/g, '');
+    const parts = cleanedText.split(',');
+    if (parts.length > 2) return;
+    if (parts[1] && parts[1].length > 2) return;
+    setAmount(cleanedText);
+  };
+
   const addExpense = () => {
     if (!amount) return;
-
-    // Converte o valor em string para número
     const numberValue = Number(amount.replace(',', '.'));
     if (isNaN(numberValue) || numberValue <= 0) return;
 
@@ -68,39 +133,47 @@ export default function DailyExpenses() {
     }).format(value);
   };
 
-  const handleAmountChange = (text: string) => {
-    // Remove tudo exceto números e vírgula
-    const cleanedText = text.replace(/[^0-9,]/g, '');
-    
-    // Garante que só existe uma vírgula
-    const parts = cleanedText.split(',');
-    if (parts.length > 2) {
-      return;
-    }
-
-    // Limita decimais a 2 dígitos
-    if (parts[1] && parts[1].length > 2) {
-      return;
-    }
-
-    setAmount(cleanedText);
-  };
-
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>Day2Day</Text>
-          <Text style={styles.date}>
-            {moment().format('DD/MM/YYYY')}
-          </Text>
+          <Text style={styles.date}>{moment().format('DD/MM/YYYY')}</Text>
         </View>
 
-        <View style={styles.totalContainer}>
-          <Text style={styles.totalLabel}>Total de Hoje</Text>
-          <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>
-            {formatCurrency(totalToday)}
-          </Text>
+        <View style={styles.mainContent}>
+          <View style={styles.statsRow}>
+            <View style={[styles.statsCard, styles.todayCard]}>
+              <Text style={styles.statsLabel}>Hoje</Text>
+              <Text style={styles.statsValue} numberOfLines={1} adjustsFontSizeToFit>
+                {formatCurrency(totalToday)}
+              </Text>
+            </View>
+            <View style={styles.statsCard}>
+              <Text style={styles.statsLabel}>Mês</Text>
+              <Text style={styles.statsValue} numberOfLines={1} adjustsFontSizeToFit>
+                {formatCurrency(monthlyStats.totalSpent)}
+              </Text>
+              <Text style={styles.statsDetail}>Faltam {monthlyStats.remainingDays} dias</Text>
+            </View>
+          </View>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statsCard}>
+              <Text style={styles.statsLabel}>Média/Dia</Text>
+              <Text style={styles.statsValue} numberOfLines={1} adjustsFontSizeToFit>
+                {formatCurrency(monthlyStats.realDailyAverage)}
+              </Text>
+              <Text style={styles.statsDetail}>{monthlyStats.daysWithExpenses} dias</Text>
+            </View>
+            <View style={styles.statsCard}>
+              <Text style={styles.statsLabel}>Previsão</Text>
+              <Text style={styles.statsValue} numberOfLines={1} adjustsFontSizeToFit>
+                {formatCurrency(monthlyStats.projectedMonthTotal)}
+              </Text>
+              <Text style={styles.statsDetail}>Final do mês</Text>
+            </View>
+          </View>
         </View>
 
         <View style={styles.inputContainer}>
@@ -138,87 +211,99 @@ export default function DailyExpenses() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: Math.max(20, width * 0.05),
+    padding: 12,
     backgroundColor: '#f5f5f5',
-    justifyContent: 'flex-start',
   },
   header: {
-    marginBottom: height * 0.05,
+    marginBottom: 16,
   },
   title: {
-    fontSize: Math.max(32, width * 0.08),
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#1a1a1a',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   date: {
-    fontSize: Math.max(16, width * 0.04),
+    fontSize: 14,
     color: '#666',
   },
-  totalContainer: {
+  mainContent: {
+    flex: 1,
+    gap: 12,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statsCard: {
+    flex: 1,
     backgroundColor: '#fff',
-    padding: Math.max(24, width * 0.06),
-    borderRadius: 16,
-    marginBottom: height * 0.05,
+    padding: 12,
+    borderRadius: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  totalLabel: {
-    fontSize: Math.max(18, width * 0.045),
+  todayCard: {
+    backgroundColor: '#007AFF',
+  },
+  statsLabel: {
+    fontSize: 12,
     color: '#666',
-    marginBottom: 8,
-    textAlign: 'center',
+    marginBottom: 4,
   },
-  totalAmount: {
-    fontSize: Math.max(42, width * 0.12),
+  statsValue: {
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#1a1a1a',
-    textAlign: 'center',
-    minHeight: 60,
+    marginBottom: 2,
+  },
+  statsDetail: {
+    fontSize: 10,
+    color: '#666',
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    gap: 8,
+    marginTop: 12,
   },
   inputWrapper: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e0e0e0',
-    paddingHorizontal: 16,
-    height: Math.max(60, height * 0.08),
+    paddingHorizontal: 12,
+    height: 48,
   },
   currencySymbol: {
-    fontSize: Math.max(20, width * 0.05),
+    fontSize: 16,
     color: '#666',
-    marginRight: 8,
+    marginRight: 6,
   },
   input: {
     flex: 1,
-    fontSize: Math.max(24, width * 0.06),
+    fontSize: 18,
     color: '#1a1a1a',
     padding: 0,
     ...Platform.select({
       ios: {
-        paddingVertical: 12,
+        paddingVertical: 8,
       },
       android: {
-        paddingVertical: 8,
+        paddingVertical: 6,
       },
     }),
   },
   addButton: {
     backgroundColor: '#007AFF',
-    width: Math.max(60, height * 0.08),
-    height: Math.max(60, height * 0.08),
-    borderRadius: 12,
+    width: 48,
+    height: 48,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -232,7 +317,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
-    fontSize: Math.max(32, width * 0.08),
+    fontSize: 24,
     fontWeight: 'bold',
   },
 }); 
