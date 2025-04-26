@@ -10,7 +10,9 @@ import {
   Dimensions,
   Keyboard,
   Platform,
-  TouchableWithoutFeedback 
+  TouchableWithoutFeedback,
+  Modal,
+  ScrollView
 } from 'react-native';
 import moment from 'moment';
 
@@ -36,6 +38,9 @@ export default function DailyExpenses() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [amount, setAmount] = useState('');
   const [totalToday, setTotalToday] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(moment());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStats>({
     daysInMonth: 0,
     remainingDays: 0,
@@ -49,15 +54,18 @@ export default function DailyExpenses() {
   useEffect(() => {
     calculateTotalToday();
     calculateMonthlyStats();
-  }, [expenses]);
+  }, [expenses, selectedDate]);
 
   const calculateMonthlyStats = () => {
+    const currentMonth = selectedDate.clone().startOf('month');
+    const daysInMonth = currentMonth.daysInMonth();
     const today = moment();
-    const daysInMonth = today.daysInMonth();
-    const remainingDays = daysInMonth - today.date();
+    const remainingDays = selectedDate.isSame(today, 'month') 
+      ? daysInMonth - today.date() 
+      : 0;
 
     const currentMonthExpenses = expenses.filter(expense => 
-      moment(expense.timestamp).isSame(today, 'month')
+      moment(expense.timestamp).isSame(currentMonth, 'month')
     );
 
     const totalSpent = currentMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
@@ -80,7 +88,9 @@ export default function DailyExpenses() {
       ? last5DaysExpenses.reduce((sum, [, amount]) => sum + amount, 0) / last5DaysExpenses.length
       : realDailyAverage;
 
-    const projectedMonthTotal = totalSpent + (projectedDailyAverage * remainingDays);
+    const projectedMonthTotal = selectedDate.isSame(today, 'month')
+      ? totalSpent + (projectedDailyAverage * remainingDays)
+      : totalSpent;
 
     setMonthlyStats({
       daysInMonth,
@@ -94,11 +104,11 @@ export default function DailyExpenses() {
   };
 
   const calculateTotalToday = () => {
-    const today = moment().startOf('day');
-    const todayExpenses = expenses.filter(expense => 
-      moment(expense.timestamp).isSame(today, 'day')
+    const targetDate = selectedDate.clone().startOf('day');
+    const targetExpenses = expenses.filter(expense => 
+      moment(expense.timestamp).isSame(targetDate, 'day')
     );
-    const total = todayExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+    const total = targetExpenses.reduce((sum, expense) => sum + expense.amount, 0);
     setTotalToday(total);
   };
 
@@ -118,7 +128,7 @@ export default function DailyExpenses() {
     const newExpense: Expense = {
       id: Date.now().toString(),
       amount: numberValue,
-      timestamp: new Date(),
+      timestamp: selectedDate.toDate(),
     };
 
     setExpenses([newExpense, ...expenses]);
@@ -133,19 +143,148 @@ export default function DailyExpenses() {
     }).format(value);
   };
 
+  const renderDatePicker = () => {
+    const days = Array.from({ length: selectedDate.daysInMonth() }, (_, i) => i + 1);
+    const today = moment();
+    const isCurrentMonth = selectedDate.isSame(today, 'month');
+
+    return (
+      <Modal
+        visible={showDatePicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDatePicker(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowDatePicker(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Selecione o Dia</Text>
+              <ScrollView style={styles.dateGrid}>
+                <View style={styles.daysContainer}>
+                  {days.map(day => {
+                    const date = selectedDate.clone().date(day);
+                    const isToday = date.isSame(today, 'day');
+                    const isPast = date.isBefore(today, 'day') || !isCurrentMonth;
+                    
+                    return (
+                      <TouchableOpacity
+                        key={day}
+                        style={[
+                          styles.dayButton,
+                          isToday && styles.todayButton,
+                          selectedDate.date() === day && styles.selectedDayButton
+                        ]}
+                        onPress={() => {
+                          setSelectedDate(prev => prev.clone().date(day));
+                          setShowDatePicker(false);
+                        }}
+                        disabled={!isPast && !isToday}
+                      >
+                        <Text style={[
+                          styles.dayText,
+                          isToday && styles.todayText,
+                          selectedDate.date() === day && styles.selectedDayText,
+                          !isPast && !isToday && styles.futureDayText
+                        ]}>
+                          {day}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+    );
+  };
+
+  const renderMonthPicker = () => {
+    const months = Array.from({ length: 12 }, (_, i) => moment().month(i));
+    const currentMonth = moment();
+
+    return (
+      <Modal
+        visible={showMonthPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMonthPicker(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowMonthPicker(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Selecione o Mês</Text>
+              <ScrollView style={styles.monthGrid}>
+                <View style={styles.monthsContainer}>
+                  {months.map((month, index) => {
+                    const isPast = month.isSameOrBefore(currentMonth, 'month');
+                    
+                    return (
+                      <TouchableOpacity
+                        key={index}
+                        style={[
+                          styles.monthButton,
+                          selectedDate.month() === index && styles.selectedMonthButton,
+                          month.isSame(currentMonth, 'month') && styles.currentMonthButton
+                        ]}
+                        onPress={() => {
+                          setSelectedDate(prev => prev.clone().month(index).date(1));
+                          setShowMonthPicker(false);
+                        }}
+                        disabled={!isPast}
+                      >
+                        <Text style={[
+                          styles.monthText,
+                          selectedDate.month() === index && styles.selectedMonthText,
+                          !isPast && styles.futureMonthText
+                        ]}>
+                          {month.format('MMMM')}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+    );
+  };
+
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>Day2Day</Text>
-          <Text style={styles.date}>{moment().format('DD/MM/YYYY')}</Text>
+          <View style={styles.dateSelectors}>
+            <TouchableOpacity 
+              style={styles.dateSelector} 
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Text style={styles.dateSelectorText}>
+                {selectedDate.format('DD')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.monthSelector} 
+              onPress={() => setShowMonthPicker(true)}
+            >
+              <Text style={styles.monthSelectorText}>
+                {selectedDate.format('MMMM')}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.mainContent}>
           <View style={styles.statsRow}>
             <View style={[styles.statsCard, styles.todayCard]}>
-              <Text style={styles.statsLabel}>Hoje</Text>
-              <Text style={styles.statsValue} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={[styles.statsLabel, styles.todayLabel]}>
+                {selectedDate.isSame(moment(), 'day') ? 'Hoje' : 'Dia'}
+              </Text>
+              <Text style={[styles.statsValue, styles.todayValue]} numberOfLines={1} adjustsFontSizeToFit>
                 {formatCurrency(totalToday)}
               </Text>
             </View>
@@ -154,7 +293,9 @@ export default function DailyExpenses() {
               <Text style={styles.statsValue} numberOfLines={1} adjustsFontSizeToFit>
                 {formatCurrency(monthlyStats.totalSpent)}
               </Text>
-              <Text style={styles.statsDetail}>Faltam {monthlyStats.remainingDays} dias</Text>
+              <Text style={styles.statsDetail}>
+                {monthlyStats.remainingDays > 0 ? `Faltam ${monthlyStats.remainingDays} dias` : 'Mês finalizado'}
+              </Text>
             </View>
           </View>
 
@@ -203,6 +344,9 @@ export default function DailyExpenses() {
             <Text style={styles.buttonText}>+</Text>
           </TouchableOpacity>
         </View>
+
+        {renderDatePicker()}
+        {renderMonthPicker()}
       </View>
     </TouchableWithoutFeedback>
   );
@@ -221,11 +365,36 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#1a1a1a',
-    marginBottom: 4,
+    marginBottom: 8,
   },
-  date: {
-    fontSize: 14,
-    color: '#666',
+  dateSelectors: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dateSelector: {
+    backgroundColor: '#fff',
+    padding: 8,
+    borderRadius: 8,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  monthSelector: {
+    backgroundColor: '#fff',
+    padding: 8,
+    borderRadius: 8,
+    flex: 1,
+  },
+  dateSelectorText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  monthSelectorText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    textAlign: 'center',
   },
   mainContent: {
     flex: 1,
@@ -254,11 +423,17 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 4,
   },
+  todayLabel: {
+    color: '#fff',
+  },
   statsValue: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#1a1a1a',
     marginBottom: 2,
+  },
+  todayValue: {
+    color: '#fff',
   },
   statsDetail: {
     fontSize: 10,
@@ -319,5 +494,89 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    width: '80%',
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  dateGrid: {
+    maxHeight: 300,
+  },
+  daysContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  dayButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
+  },
+  todayButton: {
+    backgroundColor: '#007AFF',
+  },
+  selectedDayButton: {
+    backgroundColor: '#000',
+  },
+  dayText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  todayText: {
+    color: '#fff',
+  },
+  selectedDayText: {
+    color: '#fff',
+  },
+  futureDayText: {
+    color: '#ccc',
+  },
+  monthGrid: {
+    maxHeight: 300,
+  },
+  monthsContainer: {
+    gap: 8,
+  },
+  monthButton: {
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+  },
+  selectedMonthButton: {
+    backgroundColor: '#000',
+  },
+  currentMonthButton: {
+    backgroundColor: '#007AFF',
+  },
+  monthText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    textAlign: 'center',
+  },
+  selectedMonthText: {
+    color: '#fff',
+  },
+  futureMonthText: {
+    color: '#ccc',
   },
 }); 
